@@ -2381,6 +2381,27 @@ class TestGumbelL(object):
         assert_allclose(x, xx)
 
 
+class TestGumbelR:
+
+    def test_sf(self):
+        # Expected value computed with mpmath:
+        #   >>> import mpmath
+        #   >>> mpmath.mp.dps = 40
+        #   >>> float(mpmath.mp.one - mpmath.exp(-mpmath.exp(-50)))
+        #   1.9287498479639178e-22
+        assert_allclose(stats.gumbel_r.sf(50), 1.9287498479639178e-22,
+                        rtol=1e-14)
+
+    def test_isf(self):
+        # Expected value computed with mpmath:
+        #   >>> import mpmath
+        #   >>> mpmath.mp.dps = 40
+        #   >>> float(-mpmath.log(-mpmath.log(mpmath.mp.one - 1e-17)))
+        #   39.14394658089878
+        assert_allclose(stats.gumbel_r.isf(1e-17), 39.14394658089878,
+                        rtol=1e-14)
+
+
 class TestLevyStable(object):
 
     def test_fit(self):
@@ -3418,6 +3439,9 @@ class TestErlang(object):
 
 
 class TestRayleigh(object):
+    def setup_method(self):
+        np.random.seed(1234)
+
     # gh-6227
     def test_logpdf(self):
         y = stats.rayleigh.logpdf(50)
@@ -3426,6 +3450,45 @@ class TestRayleigh(object):
     def test_logsf(self):
         y = stats.rayleigh.logsf(50)
         assert_allclose(y, -1250)
+
+    @pytest.mark.parametrize("rvs_loc,rvs_scale", [np.random.rand(2)])
+    def test_fit(self, rvs_loc, rvs_scale):
+        data = stats.rayleigh.rvs(size=250, loc=rvs_loc, scale=rvs_scale)
+
+        def scale_mle(data, floc):
+            return (np.sum((data - floc) ** 2) / (2 * len(data))) ** .5
+
+        # when `floc` is provided, `scale` is found with an analytical formula
+        scale_expect = scale_mle(data, rvs_loc)
+        loc, scale = stats.rayleigh.fit(data, floc=rvs_loc)
+        assert_equal(loc, rvs_loc)
+        assert_equal(scale, scale_expect)
+
+        # when `fscale` is fixed, superclass fit is used to determine `loc`.
+        loc, scale = stats.rayleigh.fit(data, fscale=.6)
+        assert_equal(scale, .6)
+
+        # with both parameters free, one dimensional optimization is done
+        # over a new function that takes into account the dependent relation
+        # of `scale` to `loc`.
+        loc, scale = stats.rayleigh.fit(data)
+        # test that `scale` is defined by its relation to `loc`
+        assert_equal(scale, scale_mle(data, loc))
+
+    @pytest.mark.parametrize("rvs_loc,rvs_scale", [np.random.rand(2)])
+    def test_fit_comparison_super_method(self, rvs_loc, rvs_scale):
+        # test that the objective function result of the analytical MLEs is
+        # less than or equal to that of the numerically optimized estimate
+        data = stats.rayleigh.rvs(size=250, loc=rvs_loc, scale=rvs_scale)
+
+        # obtain objective function with same method as `rv_continuous.fit`
+        args = [data, (stats.rayleigh._fitstart(data), )]
+        func = stats.rayleigh._reduce_func(args, {})[1]
+
+        _assert_less_or_close_loglike(stats.rayleigh, data, func)
+
+    def test_fit_warnings(self):
+        assert_fit_warnings(stats.rayleigh)
 
 
 class TestExponWeib(object):
